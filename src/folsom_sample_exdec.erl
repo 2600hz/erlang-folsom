@@ -49,52 +49,52 @@ new(Size, Alpha) ->
 update(#exdec{reservoir = Reservoir, alpha = Alpha, start = Start, next = Next} = Sample, Value) ->
     Timestamp = folsom_utils:now_epoch(),
 
-    % immediately see if we need to rescale
+                                                % immediately see if we need to rescale
     {NewRes, NewStart, NewNext} = rescale(Reservoir, Timestamp, Next, Start, Alpha),
 
-    % now lets update the sample if the new value is worthy
+                                                % now lets update the sample if the new value is worthy
     update(Sample#exdec{reservoir = NewRes, next = NewNext, start = NewStart}, Value, Timestamp).
 
 get_values(#exdec{reservoir = Reservoir}) ->
     {_, Values} = lists:unzip(ets:tab2list(Reservoir)),
     Values.
 
-% internal api
+                                                % internal api
 
-update(#exdec{reservoir = Reservoir, alpha = Alpha, start = Start, n = N, size = Size, seed = Seed} = Sample, Value, Timestamp) when N =< Size ->
-    % since N is =< Size we can just add the new value to the sample
+update(#exdec{reservoir = Reservoir, alpha = Alpha, start = Start, n = N, size = Size} = Sample, Value, Timestamp) when N =< Size ->
+                                                % since N is =< Size we can just add the new value to the sample
 
-    {Rand, New_seed} = random:uniform_s(N, Seed),
+    Rand = rand:uniform(N),
     Priority = priority(Alpha, Timestamp, Start, Rand),
     true = ets:insert(Reservoir, {Priority, Value}),
 
-    Sample#exdec{n = folsom_utils:get_ets_size(Reservoir), seed = New_seed};
-update(#exdec{reservoir = Reservoir, alpha = Alpha, start = Start, n = N, seed = Seed} = Sample, Value, Timestamp) ->
-    % when N is not =< Size we need to check to see if the priority of
-    % the new value is greater than the first (smallest) existing priority
+    Sample#exdec{n = folsom_utils:get_ets_size(Reservoir)};
+update(#exdec{reservoir = Reservoir, alpha = Alpha, start = Start, n = N} = Sample, Value, Timestamp) ->
+                                                % when N is not =< Size we need to check to see if the priority of
+                                                % the new value is greater than the first (smallest) existing priority
 
-    {Rand, NewSeed} = random:uniform_s(N, Seed),
+    Rand = rand:uniform(N),
     Priority = priority(Alpha, Timestamp, Start, Rand),
     First = ets:first(Reservoir),
 
-    update_on_priority(Sample, First, Priority, NewSeed, Value).
+    update_on_priority(Sample, First, Priority, Value).
 
-update_on_priority(#exdec{reservoir = Reservoir} = Sample, First, Priority, NewSeed, Value) when First < Priority ->
+update_on_priority(#exdec{reservoir = Reservoir} = Sample, First, Priority, Value) when First < Priority ->
     true = case ets:insert_new(Reservoir, {Priority, Value}) of
-        true ->
-            % priority didnt already exist, so we created it and need to delete the first one
-            ets:delete(Reservoir, First);
-        false ->
-            % priority existed, we dont need to do anything
-            true
-    end,
-    Sample#exdec{n = folsom_utils:get_ets_size(Reservoir), seed = NewSeed};
-update_on_priority(Sample, _, _, _, _) ->
+               true ->
+                                                % priority didnt already exist, so we created it and need to delete the first one
+                   ets:delete(Reservoir, First);
+               false ->
+                                                % priority existed, we dont need to do anything
+                   true
+           end,
+    Sample#exdec{n = folsom_utils:get_ets_size(Reservoir)};
+update_on_priority(Sample, _, _, _) ->
     Sample.
 
-% gaurd against a possible bug, T should always be =< ?HOURSECS
-% also to prevent overflow issues make sure alpha is always =<
-% math:log(1.79769313486231570815e+308) / 3599 = 0.19721664709457737
+                                                % gaurd against a possible bug, T should always be =< ?HOURSECS
+                                                % also to prevent overflow issues make sure alpha is always =<
+                                                % math:log(1.79769313486231570815e+308) / 3599 = 0.19721664709457737
 weight(Alpha, T) when T =< ?HOURSECS, Alpha =< 0.19721664709457737 ->
     math:exp(Alpha * T).
 
@@ -109,19 +109,19 @@ rescale(Reservoir, _, Next, Start, _) ->
     {Reservoir, Start, Next}.
 
 delete_and_rescale(Reservoir, NewStart, OldStart, Alpha) ->
-    % get the existing reservoir
+                                                % get the existing reservoir
     ResList = ets:tab2list(Reservoir),
 
-    % create a new ets table to use
+                                                % create a new ets table to use
     NewRes = folsom_metrics_histogram_ets:new(folsom_exdec,[ordered_set, {write_concurrency, true}, public]),
 
-    % populate it with new priorities and the existing values
+                                                % populate it with new priorities and the existing values
     [true = ets:insert(NewRes, {recalc_priority(Priority, Alpha, NewStart, OldStart) ,Value}) || {Priority, Value} <- ResList],
 
-    % delete the old ets table
+                                                % delete the old ets table
     true = ets:delete(Reservoir),
 
-    % return the new ets table
+                                                % return the new ets table
     NewRes.
 
 recalc_priority(Priority, Alpha, Start, OldStart) ->
